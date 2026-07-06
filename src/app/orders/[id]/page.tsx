@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getOrderById } from "@/lib/queries";
-import { StatusBadge } from "@/components/StatusBadge";
-import { formatDateShort, STAGE_STATUS_META } from "@/lib/status";
+import { OrderStatusControl } from "@/components/OrderStatusControl";
+import { StageControl } from "@/components/StageControl";
+import { formatDateShort } from "@/lib/status";
 import type { OrderStageWithType } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +18,6 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 function StageRow({ stage }: { stage: OrderStageWithType }) {
-  const meta = stage.status ? STAGE_STATUS_META[stage.status] : null;
   return (
     <li className="flex items-center justify-between gap-3 border-b border-zinc-100 py-2 last:border-0">
       <div className="flex items-center gap-3">
@@ -31,15 +31,7 @@ function StageRow({ stage }: { stage: OrderStageWithType }) {
           <span className="text-xs text-zinc-500">({stage.detail})</span>
         )}
       </div>
-      {stage.status ? (
-        <span
-          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${meta?.className}`}
-        >
-          {stage.status}
-        </span>
-      ) : (
-        <span className="text-xs text-zinc-400">не начат</span>
-      )}
+      <StageControl stageId={stage.id} status={stage.status} />
     </li>
   );
 }
@@ -76,7 +68,7 @@ export default async function OrderPage({
             {order.client?.name ?? "Без клиента"}
           </p>
         </div>
-        <StatusBadge status={order.status} />
+        <OrderStatusControl orderId={order.id} status={order.status} />
       </header>
 
       <section className="mt-6 grid grid-cols-2 gap-x-8 gap-y-4 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm sm:grid-cols-3">
