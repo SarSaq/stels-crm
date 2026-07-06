@@ -3,6 +3,11 @@ node_modules/
 .pnp
 .pnp.js
 
+# Next.js / TypeScript build artifacts
+next-env.d.ts
+*.tsbuildinfo
+.turbo/
+
 # Secrets & env
 .env
 .env.*
