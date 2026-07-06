@@ -38,3 +38,6 @@ Thumbs.db
 *.csv
 *.html
 data/
+
+# Сгенерированный seed с реальными данными — не в git
+scripts/seed.sql
