@@ -16,29 +16,77 @@ const ORDER_SELECT = `
 
 export interface OrdersQuery {
   status?: OrderStatus;
+  managerId?: number;
   search?: string;
-  limit?: number;
+  page?: number;
+  pageSize?: number;
 }
 
-export async function getOrders(
-  params: OrdersQuery = {},
-): Promise<OrderWithRelations[]> {
+export interface OrdersPage {
+  orders: OrderWithRelations[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export async function getOrders(params: OrdersQuery = {}): Promise<OrdersPage> {
   const supabase = await createClient();
+  const pageSize = params.pageSize ?? 50;
+  const page = Math.max(1, params.page ?? 1);
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
   let query = supabase
     .from("orders")
-    .select(ORDER_SELECT)
+    .select(ORDER_SELECT, { count: "exact" })
     .order("created_at", { ascending: false })
-    .limit(params.limit ?? 200);
+    .range(from, to);
 
   if (params.status) query = query.eq("status", params.status);
+  if (params.managerId) query = query.eq("manager_id", params.managerId);
+
   if (params.search) {
-    const term = `%${params.search}%`;
-    query = query.or(`description.ilike.${term},file_name.ilike.${term}`);
+    const term = params.search.trim();
+    // PostgREST or(): подстановочный знак — «*», не «%».
+    const like = `*${term.replace(/[*(),]/g, " ")}*`;
+    const parts = [`description.ilike.${like}`, `file_name.ilike.${like}`];
+
+    // Поиск по номеру заказа.
+    if (/^\d+$/.test(term)) parts.push(`legacy_num.eq.${term}`);
+
+    // Поиск по имени клиента — резолвим id и добавляем client_id.in.(...).
+    const { data: cl } = await supabase
+      .from("clients")
+      .select("id")
+      .ilike("name", `%${term}%`)
+      .limit(500);
+    const ids = (cl ?? []).map((c) => (c as { id: number }).id);
+    if (ids.length) parts.push(`client_id.in.(${ids.join(",")})`);
+
+    query = query.or(parts.join(","));
   }
 
-  const { data, error } = await query;
+  const { data, count, error } = await query;
   if (error) throw new Error(`getOrders: ${error.message}`);
-  return (data ?? []) as unknown as OrderWithRelations[];
+  return {
+    orders: (data ?? []) as unknown as OrderWithRelations[],
+    total: count ?? 0,
+    page,
+    pageSize,
+  };
+}
+
+export async function getManagers(): Promise<
+  { id: number; full_name: string }[]
+> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("users")
+    .select("id, full_name")
+    .eq("role", "manager")
+    .order("full_name");
+  if (error) throw new Error(`getManagers: ${error.message}`);
+  return (data ?? []) as { id: number; full_name: string }[];
 }
 
 // Счётчики по статусам — для шапки/будущего канбана.
