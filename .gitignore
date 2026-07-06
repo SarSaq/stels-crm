@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Secrets & env
+.env
+.env.*
+!.env.example
+*.pem
+service-account*.json
+gcp-*.json
+credentials*.json
+
+# Build output
+dist/
+build/
+.next/
+out/
+
+# Vercel
+.vercel
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Data exports / snapshots (реальные данные заказчика — не в git)
+*.csv
+*.html
+data/
