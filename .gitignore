@@ -46,3 +46,6 @@ data/
 
 # Сгенерированный seed с реальными данными — не в git
 scripts/seed.sql
+
+.vercel
+.env*
