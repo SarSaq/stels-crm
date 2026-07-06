@@ -55,6 +55,21 @@ export async function getStatusCounts(): Promise<Record<string, number>> {
   return counts;
 }
 
+// Заказы для канбана: только активные (без «Отгружено»/«Отмена»).
+export async function getBoardOrders(): Promise<OrderWithRelations[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("orders")
+    .select(ORDER_SELECT)
+    .not("status", "in", '("Отгружено","Отмена")')
+    .order("is_fire", { ascending: false })
+    .order("is_urgent", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(1000);
+  if (error) throw new Error(`getBoardOrders: ${error.message}`);
+  return (data ?? []) as unknown as OrderWithRelations[];
+}
+
 export type OrderStageWithType = OrderStage & {
   stage_type: Pick<StageType, "id" | "name" | "kind"> | null;
 };

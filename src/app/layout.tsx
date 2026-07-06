@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { Nav } from "@/components/Nav";
 
 export const metadata: Metadata = {
   title: "Stels CRM",
@@ -12,6 +13,7 @@ export default function RootLayout({
   return (
     <html lang="ru">
       <body className="min-h-screen bg-[var(--background)] text-[var(--foreground)] font-sans">
+        <Nav />
         {children}
       </body>
     </html>
