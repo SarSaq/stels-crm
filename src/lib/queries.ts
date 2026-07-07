@@ -6,12 +6,22 @@ import type {
   StageType,
 } from "./database.types";
 
-// Выборка для списка заказов с присоединёнными именами клиента/менеджера/материала.
+export type OrderStageWithType = OrderStage & {
+  stage_type: Pick<StageType, "id" | "name" | "kind"> | null;
+};
+
+// Заказ со связями + этапами — единица строки списка.
+export type OrderRowData = OrderWithRelations & {
+  stages: OrderStageWithType[];
+};
+
+// Выборка для списка: связи + этапы (для инлайн-очереди и статусов).
 const ORDER_SELECT = `
   *,
   client:clients(id, name),
   manager:manager_id(id, full_name),
-  material:materials(id, name)
+  material:materials(id, name),
+  stages:order_stages(*, stage_type:stage_types(id, name, kind))
 ` as const;
 
 export interface OrdersQuery {
@@ -23,10 +33,16 @@ export interface OrdersQuery {
 }
 
 export interface OrdersPage {
-  orders: OrderWithRelations[];
+  orders: OrderRowData[];
   total: number;
   page: number;
   pageSize: number;
+}
+
+// Этапы приходят в произвольном порядке — сортируем по sequence на клиенте выборки.
+function sortStages(order: OrderRowData): OrderRowData {
+  order.stages = (order.stages ?? []).sort((a, b) => a.sequence - b.sequence);
+  return order;
 }
 
 export async function getOrders(params: OrdersQuery = {}): Promise<OrdersPage> {
@@ -51,10 +67,8 @@ export async function getOrders(params: OrdersQuery = {}): Promise<OrdersPage> {
     const like = `*${term.replace(/[*(),]/g, " ")}*`;
     const parts = [`description.ilike.${like}`, `file_name.ilike.${like}`];
 
-    // Поиск по номеру заказа.
     if (/^\d+$/.test(term)) parts.push(`legacy_num.eq.${term}`);
 
-    // Поиск по имени клиента — резолвим id и добавляем client_id.in.(...).
     const { data: cl } = await supabase
       .from("clients")
       .select("id")
@@ -68,13 +82,11 @@ export async function getOrders(params: OrdersQuery = {}): Promise<OrdersPage> {
 
   const { data, count, error } = await query;
   if (error) throw new Error(`getOrders: ${error.message}`);
-  return {
-    orders: (data ?? []) as unknown as OrderWithRelations[],
-    total: count ?? 0,
-    page,
-    pageSize,
-  };
+  const orders = ((data ?? []) as unknown as OrderRowData[]).map(sortStages);
+  return { orders, total: count ?? 0, page, pageSize };
 }
+
+// --- Справочники для инлайн-редактирования ---
 
 export async function getManagers(): Promise<
   { id: number; full_name: string }[]
@@ -89,7 +101,27 @@ export async function getManagers(): Promise<
   return (data ?? []) as { id: number; full_name: string }[];
 }
 
-// Счётчики по статусам — для шапки/будущего канбана.
+export async function getMaterials(): Promise<{ id: number; name: string }[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("materials")
+    .select("id, name")
+    .order("name");
+  if (error) throw new Error(`getMaterials: ${error.message}`);
+  return (data ?? []) as { id: number; name: string }[];
+}
+
+export async function getClients(): Promise<{ id: number; name: string }[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("clients")
+    .select("id, name")
+    .order("name");
+  if (error) throw new Error(`getClients: ${error.message}`);
+  return (data ?? []) as { id: number; name: string }[];
+}
+
+// Счётчики по статусам — для чипов-фильтров.
 export async function getStatusCounts(): Promise<Record<string, number>> {
   const supabase = await createClient();
   const { data, error } = await supabase.from("orders").select("status");
@@ -101,54 +133,4 @@ export async function getStatusCounts(): Promise<Record<string, number>> {
     counts[s] = (counts[s] ?? 0) + 1;
   }
   return counts;
-}
-
-// Заказы для канбана: только активные (без «Отгружено»/«Отмена»).
-export async function getBoardOrders(): Promise<OrderWithRelations[]> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("orders")
-    .select(ORDER_SELECT)
-    .not("status", "in", '("Отгружено","Отмена")')
-    .order("is_fire", { ascending: false })
-    .order("is_urgent", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(1000);
-  if (error) throw new Error(`getBoardOrders: ${error.message}`);
-  return (data ?? []) as unknown as OrderWithRelations[];
-}
-
-export type OrderStageWithType = OrderStage & {
-  stage_type: Pick<StageType, "id" | "name" | "kind"> | null;
-};
-
-export interface OrderDetail {
-  order: OrderWithRelations;
-  stages: OrderStageWithType[];
-}
-
-export async function getOrderById(id: number): Promise<OrderDetail | null> {
-  const supabase = await createClient();
-
-  const { data: order, error } = await supabase
-    .from("orders")
-    .select(ORDER_SELECT)
-    .eq("id", id)
-    .maybeSingle();
-
-  if (error) throw new Error(`getOrderById: ${error.message}`);
-  if (!order) return null;
-
-  const { data: stages, error: stErr } = await supabase
-    .from("order_stages")
-    .select(`*, stage_type:stage_types(id, name, kind)`)
-    .eq("order_id", id)
-    .order("sequence", { ascending: true });
-
-  if (stErr) throw new Error(`getOrderById.stages: ${stErr.message}`);
-
-  return {
-    order: order as unknown as OrderWithRelations,
-    stages: (stages ?? []) as unknown as OrderStageWithType[],
-  };
 }

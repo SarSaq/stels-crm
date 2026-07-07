@@ -77,8 +77,6 @@ export async function setOrderStatus(
   }
 
   revalidatePath("/");
-  revalidatePath("/board");
-  revalidatePath(`/orders/${orderId}`);
   return { ok: true };
 }
 
@@ -144,7 +142,132 @@ export async function setStageStatus(
   }
 
   revalidatePath("/");
-  revalidatePath("/board");
-  revalidatePath(`/orders/${orderId}`);
+  return { ok: true };
+}
+
+// --- ИНЛАЙН-РЕДАКТИРОВАНИЕ ПОЛЕЙ ЗАКАЗА ---
+
+type FieldKind = "text" | "int" | "fk" | "bool" | "date";
+
+// Whitelist редактируемых колонок с типом. Статус — только через setOrderStatus (каскад).
+const EDITABLE_FIELDS: Record<string, FieldKind> = {
+  description: "text",
+  source_link: "text",
+  print_method: "text",
+  print_equipment: "text",
+  color: "text",
+  file_name: "text",
+  print_link: "text",
+  preview_url: "text",
+  tech_notes: "text",
+  quantity: "int",
+  width_mm: "int",
+  height_mm: "int",
+  sides: "int",
+  client_id: "fk",
+  manager_id: "fk",
+  material_id: "fk",
+  material_available: "bool",
+  is_urgent: "bool",
+  is_fire: "bool",
+  flag_scotch: "bool",
+  flag_vyborka: "bool",
+  flag_mount_film: "bool",
+  due_date: "date",
+};
+
+function coerce(kind: FieldKind, raw: unknown): unknown {
+  if (raw === "" || raw === null || raw === undefined) return null;
+  switch (kind) {
+    case "int":
+    case "fk": {
+      const n = Math.trunc(Number(raw));
+      return Number.isFinite(n) ? n : null;
+    }
+    case "bool":
+      return raw === true || raw === "true" || raw === "1";
+    case "date":
+    case "text":
+    default:
+      return String(raw);
+  }
+}
+
+export async function updateOrderField(
+  orderId: number,
+  field: string,
+  value: unknown,
+): Promise<ActionResult> {
+  const kind = EDITABLE_FIELDS[field];
+  if (!kind) return { ok: false, error: `Поле «${field}» нельзя менять` };
+
+  const supabase = await createClient();
+  const next = coerce(kind, value);
+
+  const { data: before, error: bErr } = await supabase
+    .from("orders")
+    .select(`id, ${field}`)
+    .eq("id", orderId)
+    .maybeSingle();
+  if (bErr) return { ok: false, error: bErr.message };
+  if (!before) return { ok: false, error: "Заказ не найден" };
+
+  const prev = (before as unknown as Record<string, unknown>)[field] ?? null;
+  if (String(prev ?? "") === String(next ?? "")) return { ok: true };
+
+  const { error: upErr } = await supabase
+    .from("orders")
+    .update({ [field]: next })
+    .eq("id", orderId);
+  if (upErr) return { ok: false, error: upErr.message };
+
+  await logHistory(
+    supabase,
+    orderId,
+    `order.${field}`,
+    prev == null ? null : String(prev),
+    next == null ? null : String(next),
+  );
+
+  revalidatePath("/");
+  return { ok: true };
+}
+
+// --- ПЕРЕСТАНОВКА ЭТАПОВ (очередность) ---
+export async function reorderStages(
+  orderId: number,
+  orderedIds: number[],
+): Promise<ActionResult> {
+  const supabase = await createClient();
+
+  // Проверяем, что все этапы принадлежат заказу.
+  const { data: stages, error } = await supabase
+    .from("order_stages")
+    .select("id")
+    .eq("order_id", orderId);
+  if (error) return { ok: false, error: error.message };
+  const own = new Set((stages ?? []).map((s) => (s as { id: number }).id));
+  if (!orderedIds.every((id) => own.has(id))) {
+    return { ok: false, error: "Этап не принадлежит заказу" };
+  }
+
+  // Проставляем sequence 10,20,30… по новому порядку.
+  for (let i = 0; i < orderedIds.length; i++) {
+    const { error: upErr } = await supabase
+      .from("order_stages")
+      .update({ sequence: (i + 1) * 10 })
+      .eq("id", orderedIds[i]);
+    if (upErr) return { ok: false, error: upErr.message };
+  }
+
+  await logHistory(
+    supabase,
+    orderId,
+    "stages.sequence",
+    null,
+    orderedIds.join(","),
+  );
+
+  revalidatePath("/");
   return { ok: true };
 }
